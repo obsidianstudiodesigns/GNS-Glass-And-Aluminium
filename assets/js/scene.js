@@ -28,7 +28,7 @@ function init() {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x0e0e0f, 22, 40);
+  scene.fog = new THREE.Fog(0x0e0e0f, 16, 36);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
 
@@ -37,11 +37,14 @@ function init() {
   /* ---------- Materials ---------- */
   const alu = new THREE.MeshStandardMaterial({ color: 0x2b2e33, metalness: 0.85, roughness: 0.38 });
   const plaster = new THREE.MeshStandardMaterial({ color: 0xb9b5ae, roughness: 0.95 });
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x161618, roughness: 0.6, metalness: 0.2 });
+  const floorMat = new THREE.MeshStandardMaterial({ color: 0x1d1d1f, roughness: 0.85 });
+  const roomMat = new THREE.MeshStandardMaterial({ color: 0x4a423b, roughness: 1 });
   const orange = new THREE.MeshBasicMaterial({ color: 0xec621f, toneMapped: false });
-  const glass = small
-    ? new THREE.MeshPhysicalMaterial({ color: 0xcfe0e4, roughness: 0.05, metalness: 0, transparent: true, opacity: 0.22, envMapIntensity: 1.6 })
-    : new THREE.MeshPhysicalMaterial({ color: 0xeaf3f4, roughness: 0.03, metalness: 0, transmission: 1, thickness: 0.04, ior: 1.52, envMapIntensity: 1.4, specularIntensity: 1 });
+  // Plain transparent glass: transmission glass flickers when panes stack behind each other
+  const glass = new THREE.MeshPhysicalMaterial({
+    color: 0xd6e6ea, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.2,
+    envMapIntensity: 1.5, depthWrite: false, side: THREE.DoubleSide
+  });
 
   const box = (w, h, d, mat, x = 0, y = 0, z = 0) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -75,19 +78,20 @@ function init() {
   for (let i = 0; i < P; i++) {
     const g = new THREE.Group();
     const ph = H - t * 0.6;
-    g.add(box(pw, t, 0.045, alu, 0, ph - t / 2, 0));
-    g.add(box(pw, t * 1.4, 0.045, alu, 0, t * 0.7, 0));
-    g.add(box(t, ph, 0.045, alu, -pw / 2 + t / 2, ph / 2, 0));
-    g.add(box(t, ph, 0.045, alu, pw / 2 - t / 2, ph / 2, 0));
+    g.add(box(pw, t, 0.04, alu, 0, ph - t / 2, 0));
+    g.add(box(pw, t * 1.4, 0.04, alu, 0, t * 0.7, 0));
+    g.add(box(t, ph, 0.04, alu, -pw / 2 + t / 2, ph / 2, 0));
+    g.add(box(t, ph, 0.04, alu, pw / 2 - t / 2, ph / 2, 0));
     const pane = new THREE.Mesh(new THREE.BoxGeometry(pw - t * 2, ph - t * 2.4, 0.012), glass);
     pane.position.y = t * 1.4 + (ph - t * 2.4) / 2;
+    pane.renderOrder = 1;
     g.add(pane);
     // slim handle on the lead panel
     if (i === P - 1) g.add(box(0.02, 0.36, 0.03, alu, -pw / 2 + t + 0.06, 1.05, 0.04));
 
     const closedX = -W / 2 + (W / P) * (i + 0.5);
-    const openX = -W / 2 + pw / 2 + i * 0.07;
-    const z = (i - (P - 1) / 2) * 0.05;
+    const openX = -W / 2 + pw / 2 + i * 0.1;
+    const z = (i - (P - 1) / 2) * 0.065;
     g.position.set(closedX, t * 0.6, z);
     g.userData = { closedX, openX };
     house.add(g);
@@ -105,47 +109,36 @@ function init() {
   };
   house.add(rafter(2.3, -1), rafter(1.1, 1));
 
-  // Floors: inside and a paved stoep outside
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), floorMat);
+  // Floor fades into the section colour through the fog, so there is no visible edge
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
 
-  // The view through the glass: dusk sky, warm at the horizon
-  const skyCanvas = document.createElement('canvas');
-  skyCanvas.width = 16; skyCanvas.height = 256;
-  const sctx = skyCanvas.getContext('2d');
-  const grad = sctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#1b2330');
-  grad.addColorStop(0.55, '#51607a');
-  grad.addColorStop(0.8, '#e0936a');
-  grad.addColorStop(1, '#f2b27c');
-  sctx.fillStyle = grad;
-  sctx.fillRect(0, 0, 16, 256);
-  const skyTex = new THREE.CanvasTexture(skyCanvas);
-  skyTex.colorSpace = THREE.SRGBColorSpace;
-  const sky = new THREE.Mesh(new THREE.PlaneGeometry(90, 30), new THREE.MeshBasicMaterial({ map: skyTex, fog: false }));
-  sky.position.set(0, 9, -18);
-  scene.add(sky);
-
-  // Low sea-line horizon block to give depth
-  const horizon = box(90, 0.9, 0.1, new THREE.MeshStandardMaterial({ color: 0x223040, roughness: 1 }), 0, 0.45, -17.8);
-  scene.add(horizon);
+  // A warm room behind the opening, seen through the glass
+  const room = new THREE.Group();
+  const rw = wallW - 0.5, rh = wallH - 0.15, rd = 3.8;
+  room.add(box(rw, rh, 0.1, roomMat, 0, rh / 2, -rd));
+  room.add(box(0.1, rh, rd, roomMat, -rw / 2 + 0.05, rh / 2, -rd / 2));
+  room.add(box(0.1, rh, rd, roomMat, rw / 2 - 0.05, rh / 2, -rd / 2));
+  room.add(box(rw, 0.1, rd, roomMat, 0, rh, -rd / 2));
+  scene.add(room);
 
   /* ---------- Lights ---------- */
-  scene.add(new THREE.HemisphereLight(0xfff1e0, 0x1a1a1c, 0.5));
-  const sun = new THREE.DirectionalLight(0xffd7b0, 2.6);
-  sun.position.set(-4, 6, -5);
+  scene.add(new THREE.HemisphereLight(0xfff1e0, 0x111113, 0.35));
+  const sun = new THREE.DirectionalLight(0xffe2c2, 2.4);
+  sun.position.set(-6, 8, 7);
   sun.castShadow = !small;
-  sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.left = -6; sun.shadow.camera.right = 6;
-  sun.shadow.camera.top = 6; sun.shadow.camera.bottom = -2;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.03;
+  Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -4, near: 1, far: 30 });
   scene.add(sun);
-  const key = new THREE.DirectionalLight(0xffffff, 0.7);
-  key.position.set(4, 4, 6);
-  scene.add(key);
-  const glow = new THREE.PointLight(0xec621f, 6, 6, 2);
-  glow.position.set(0.9, H + 0.8, 1);
+  const interior = new THREE.PointLight(0xffb36b, 28, 12, 1.6);
+  interior.position.set(0.4, 2.2, -2.2);
+  scene.add(interior);
+  const glow = new THREE.PointLight(0xec621f, 4, 5, 2);
+  glow.position.set(0.8, H + 1.2, 1);
   scene.add(glow);
 
   /* ---------- Sizing ---------- */
@@ -210,7 +203,7 @@ function init() {
     else lookAt.set(lerp(-2.6, -2.2, c), lerp(1.7, 1.5, c), 0);
     camera.lookAt(lookAt);
 
-    glow.intensity = 5 + Math.sin(time * 1.6) * 1.2;
+    glow.intensity = 3.5 + Math.sin(time * 1.6) * 0.8;
 
     bar.style.transform = `scaleX(${prog})`;
     if (hint) hint.style.opacity = prog > 0.05 ? 0 : 1;
